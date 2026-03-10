@@ -37,7 +37,7 @@
             display: flex;
             justify-content: center;
             align-items: flex-start;
-            padding: 0.5rem; /* Reduced padding for mobile */
+            padding: 0.5rem;
             font-family: 'Inter', sans-serif;
             color: var(--text-color);
             transition: background-color 0.3s, color 0.3s;
@@ -124,7 +124,6 @@
         #splash-logo {
             animation: pulse 1.5s infinite ease-in-out;
         }
-        
     </style>
 </head>
 <body>
@@ -139,7 +138,6 @@
         <div class="mt-4 text-gray-400">Loading your knowledge challenge...</div>
     </div>
 
-    <!-- Auth overlay -->
     <div id="auth-overlay" class="fixed inset-0 z-[10000] hidden">
         <div class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
         <div class="relative h-full w-full flex items-center justify-center p-4">
@@ -343,27 +341,17 @@
     </div>
 
     <script>
-        // ---- Supabase config (REQUIRED) ----
-        // Keys are loaded from Vercel env via `/api/env`.
-        // Put values in Vercel Project → Settings → Environment Variables
-        // (and optionally in local `.env` when running `vercel dev`).
         let supabaseClient = null;
-
-        const initSupabaseClient = async () => {
-            if (!window.supabase) return null;
-            if (supabaseClient) return supabaseClient;
-            try {
-                const res = await fetch('/api/env', { cache: 'no-store' });
-                if (!res.ok) throw new Error('Failed to load env');
-                const env = await res.json();
-                if (!env?.SUPABASE_URL || !env?.SUPABASE_ANON_KEY) throw new Error('Missing env');
-                supabaseClient = window.supabase.createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY);
-                return supabaseClient;
-            } catch {
-                // If running as a plain file (file://) or without Vercel functions,
-                // Supabase auth won't work. Guest mode still works via localStorage.
-                return null;
-            }
+        let currentUser = null;
+        let currentQuizId = null;
+        let currentQuiz = null;
+        let currentQuestionIndex = 0;
+        let score = 0;
+        let answered = false;
+        let userStats = {
+            history: [],
+            overallHighestAbsolute: { score: 0, total: 0, title: '' }, 
+            overallHighestPercentage: { percentage: 0, score: 0, total: 0, title: '' }
         };
 
         const allQuizzes = [
@@ -437,239 +425,44 @@
                     { question: "What is the term for a narrow strip of land connecting two larger landmasses?", options: ["Peninsula", "Archipelago", "Isthmus", "Plateau"], correct: "Isthmus" }
                 ]
             },
-            // --- NEW SUBJECTIVE QUIZ SECTION ADDED HERE ---
             {
                 id: 'quiz-subjective',
                 title: 'Subjective Critical Thinking',
                 icon: '<svg class="w-6 h-6 mr-3 text-accent-purple" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h0a6 6 0 0 1-6-6V4h12v10a6 6 0 0 1-6 6zM5 19l19-14M19 19L5 5"/></svg>',
                 description: 'Open-ended questions requiring detailed, self-assessed answers.',
-                type: 'subjective', // New type to differentiate
+                type: 'subjective',
                 questions: [
                     { question: "Explain the main differences between object-oriented programming (OOP) and functional programming.", modelAnswer: "OOP focuses on objects, which bundle data and methods, and concepts like encapsulation, inheritance, and polymorphism. Functional programming (FP) focuses on functions, immutability, and avoiding shared state, treating computation as the evaluation of mathematical functions. FP languages often use concepts like pure functions, map, reduce, and filter." },
                     { question: "Discuss the potential ethical implications of widespread Artificial Intelligence (AI) deployment in the workplace.", modelAnswer: "Ethical implications include job displacement and widening economic inequality, algorithmic bias leading to unfair hiring/promotion, lack of transparency (the 'black box' problem), and issues of accountability when an AI makes a critical error." },
                     { question: "Describe the primary factors that led to the collapse of the Roman Empire in the West.", modelAnswer: "Key factors include internal political instability and corruption, military overextension and the cost of defense, economic troubles (inflation, excessive taxation), social problems (wealth gap, decline of civic virtue), and successive invasions by various barbarian tribes." }
                 ]
             }
-            // ----------------------------------------------
         ];
 
         const body = document.body;
         const appWrapper = document.getElementById('app-wrapper');
         const splashScreen = document.getElementById('splash-screen');
-        const allScreens = {
-            'dashboard': document.getElementById('dashboard-screen'),
-            'select': document.getElementById('select-screen'),
-            'quiz': document.getElementById('quiz-area'),
-            'results': document.getElementById('results-screen')
-        };
-        const navLinks = document.querySelectorAll('.nav-link');
-        
-        const nextButton = document.getElementById('next-button');
-        const questionText = document.getElementById('question-text');
-        const optionsContainer = document.getElementById('options-container');
-        const progressText = document.getElementById('progress-text');
-        const progressBar = document.getElementById('progress-bar');
-        const resultsTitle = document.getElementById('results-title');
-        const resultsScore = document.getElementById('results-score');
-        const messageBox = document.getElementById('message-box');
-        const quizTitleElement = document.getElementById('quiz-title');
-        const quizListContainer = document.getElementById('quiz-list-container');
-
-        const dashboardSelectButton = document.getElementById('dashboard-select-quiz');
-        const resultsDashboardButton = document.getElementById('results-dashboard-button');
-        const themeToggle = document.getElementById('theme-toggle');
-        const sunIcon = document.getElementById('sun-icon');
-        const moonIcon = document.getElementById('moon-icon');
-        const themeText = document.getElementById('theme-text');
-        const userLabel = document.getElementById('user-label');
-        const signOutBtn = document.getElementById('sign-out');
         const authOverlay = document.getElementById('auth-overlay');
-        const authClose = document.getElementById('auth-close');
-        const authTabSignin = document.getElementById('auth-tab-signin');
-        const authTabSignup = document.getElementById('auth-tab-signup');
-        const authEmail = document.getElementById('auth-email');
-        const authPassword = document.getElementById('auth-password');
-        const authSubmit = document.getElementById('auth-submit');
-        const authError = document.getElementById('auth-error');
-        const authTitle = document.getElementById('auth-title');
-        const authGuest = document.getElementById('auth-guest');
         const signInBtn = document.getElementById('sign-in');
-
-        const statCompleted = document.getElementById('stat-completed');
-        const statAccuracy = document.getElementById('stat-accuracy');
-        const statHighest = document.getElementById('stat-highest');
-        const statBestQuiz = document.getElementById('stat-best-quiz');
-        const quizHistoryContainer = document.getElementById('quiz-history-container');
-        const noHistoryMessage = document.getElementById('no-history-message');
-
-        // New subjective elements
+        const signOutBtn = document.getElementById('sign-out');
+        const userLabel = document.getElementById('user-label');
+        const nextButton = document.getElementById('next-button');
+        const optionsContainer = document.getElementById('options-container');
         const subjectiveInputArea = document.getElementById('subjective-input-area');
         const subjectiveAnswerTextarea = document.getElementById('subjective-answer');
         const submitSubjectiveButton = document.getElementById('submit-subjective');
         const subjectiveFeedbackDiv = document.getElementById('subjective-feedback');
-        const modelAnswerText = document.getElementById('model-answer-text');
         const markCorrectButton = document.getElementById('mark-correct');
         const markIncorrectButton = document.getElementById('mark-incorrect');
 
-        let currentQuestionIndex = 0;
-        let score = 0;
-        let answered = false;
-        let currentQuizId = null;
-        let currentQuiz = null;
-
-        let userStats = {
-            history: [],
-            overallHighestAbsolute: { score: 0, total: 0, title: '' }, 
-            overallHighestPercentage: { percentage: 0, score: 0, total: 0, title: '' }
-        };
-
-        let authMode = 'signin'; // 'signin' | 'signup'
-        let currentUser = null;
-        let progressSaveTimer = null;
-        let progressLoaded = false;
-
-        // Public-safe logging (off by default). Enable locally via:
-        // localStorage.setItem('ashquiz_debug','1') then refresh.
-        const isDebugEnabled = () => {
+        const initSupabaseClient = async () => {
             try {
-                return localStorage.getItem('ashquiz_debug') === '1' ||
-                    ['localhost', '127.0.0.1'].includes(window.location.hostname);
-            } catch {
-                return false;
-            }
-        };
-        const debugLog = (...args) => { if (isDebugEnabled()) console.log(...args); };
-        const debugWarn = (...args) => { if (isDebugEnabled()) console.warn(...args); };
-
-        const setAuthError = (msg) => {
-            if (!msg) {
-                authError.classList.add('hidden');
-                authError.textContent = '';
-                return;
-            }
-            authError.textContent = msg;
-            authError.classList.remove('hidden');
-        };
-
-        const setAuthMode = (mode) => {
-            authMode = mode;
-            setAuthError('');
-            if (mode === 'signin') {
-                authTabSignin.classList.add('bg-accent-blue', 'text-white');
-                authTabSignin.classList.remove('bg-hover-color/60');
-                authTabSignup.classList.remove('bg-accent-blue', 'text-white');
-                authTabSignup.classList.add('bg-hover-color/60');
-                authSubmit.textContent = 'Continue';
-                authTitle.textContent = 'Welcome back';
-            } else {
-                authTabSignup.classList.add('bg-accent-blue', 'text-white');
-                authTabSignup.classList.remove('bg-hover-color/60');
-                authTabSignin.classList.remove('bg-accent-blue', 'text-white');
-                authTabSignin.classList.add('bg-hover-color/60');
-                authSubmit.textContent = 'Create account';
-                authTitle.textContent = 'Create your account';
-            }
-        };
-
-        const openAuthOverlay = ({ allowClose = false } = {}) => {
-            authOverlay.classList.remove('hidden');
-            if (allowClose) authClose.classList.remove('hidden');
-            else authClose.classList.add('hidden');
-            setAuthMode('signin');
-            setAuthError('');
-        };
-
-        const closeAuthOverlay = () => {
-            authOverlay.classList.add('hidden');
-            setAuthError('');
-        };
-
-        const getLocalDraft = () => {
-            try {
-                const raw = localStorage.getItem('ashquiz_local_draft');
-                return raw ? JSON.parse(raw) : null;
-            } catch {
-                return null;
-            }
-        };
-
-        const setLocalDraft = (draft) => {
-            try {
-                localStorage.setItem('ashquiz_local_draft', JSON.stringify(draft));
-            } catch {
-                // ignore storage failures
-            }
-        };
-
-        const buildProgressPayload = () => {
-            const state = {
-                inProgress: Boolean(currentQuizId && currentQuiz && currentQuestionIndex < currentQuiz.questions.length),
-                quizId: currentQuizId,
-                questionIndex: currentQuestionIndex,
-                score,
-                updatedAt: new Date().toISOString()
-            };
-            return {
-                stats: userStats,
-                state
-            };
-        };
-
-        const applyLoadedProgress = (payload) => {
-            if (!payload) return;
-            if (payload.stats && typeof payload.stats === 'object') {
-                userStats = payload.stats;
-            }
-            if (payload.state && typeof payload.state === 'object') {
-                const { inProgress, quizId, questionIndex, score: loadedScore } = payload.state;
-                if (inProgress && quizId) {
-                    const quiz = allQuizzes.find(q => q.id === quizId);
-                    if (quiz) {
-                        currentQuizId = quizId;
-                        currentQuiz = quiz;
-                        currentQuestionIndex = Math.max(0, Math.min(Number(questionIndex || 0), quiz.questions.length));
-                        score = Math.max(0, Number(loadedScore || 0));
-                    }
-                }
-            }
-        };
-
-        const loadProgressFromSupabase = async () => {
-            if (!supabaseClient || !currentUser) return null;
-            const { data, error } = await supabaseClient
-                .from('ash_user_progress')
-                .select('stats, state')
-                .eq('user_id', currentUser.id)
-                .maybeSingle();
-            if (error) {
-                debugWarn('Failed to load progress:', error.message);
-                return null;
-            }
-            return data || null;
-        };
-
-        const saveProgressToSupabase = async (payload) => {
-            if (!supabaseClient || !currentUser) return;
-            const row = {
-                user_id: currentUser.id,
-                stats: payload.stats,
-                state: payload.state,
-                updated_at: new Date().toISOString()
-            };
-            const { error } = await supabaseClient
-                .from('ash_user_progress')
-                .upsert(row, { onConflict: 'user_id' });
-            if (error) debugWarn('Failed to save progress:', error.message);
-        };
-
-        const scheduleProgressSave = (reason = 'auto') => {
-            const payload = buildProgressPayload();
-            setLocalDraft(payload);
-            if (!supabaseClient || !currentUser) return;
-            if (progressSaveTimer) window.clearTimeout(progressSaveTimer);
-            progressSaveTimer = window.setTimeout(() => {
-                saveProgressToSupabase(payload).catch(() => {});
-            }, reason === 'quiz_completed' ? 0 : 600);
+                const res = await fetch('/api/env', { cache: 'no-store' });
+                if (!res.ok) throw new Error('Failed to load env');
+                const env = await res.json();
+                supabaseClient = window.supabase.createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY);
+                return supabaseClient;
+            } catch { return null; }
         };
 
         const updateAuthUI = () => {
@@ -684,628 +477,61 @@
             }
         };
 
-        const ensureSignedIn = async () => {
-            if (!supabaseClient) {
-                // Supabase not available (e.g. static file preview). Run silently in guest mode.
-                currentUser = null;
-                updateAuthUI();
-                return;
-            }
-
-            const { data } = await supabaseClient.auth.getSession();
-            currentUser = data?.session?.user ?? null;
-            updateAuthUI();
-
-            if (!currentUser) {
-                return;
-            }
-
-            // Load progress once per session
-            if (!progressLoaded) {
-                const remote = await loadProgressFromSupabase();
-                const localDraft = getLocalDraft();
-                // Prefer remote if it exists; otherwise use local
-                applyLoadedProgress(remote || localDraft);
-                progressLoaded = true;
-                // Refresh any visible stats after loading
-                updateDashboardStats();
-            }
-        };
-
-        const toggleTheme = () => {
-            const isLight = body.classList.toggle('light-mode');
-            
-            if (isLight) {
-                sunIcon.classList.remove('hidden');
-                moonIcon.classList.add('hidden');
-                themeText.textContent = 'Dark Mode';
-            } else {
-                sunIcon.classList.add('hidden');
-                moonIcon.classList.remove('hidden');
-                themeText.textContent = 'Light Mode';
-            }
+        const revealApp = () => {
+            appWrapper.classList.remove('hidden');
+            appWrapper.style.opacity = '1';
         };
 
         const showScreen = (screenId) => {
-            Object.values(allScreens).forEach(screen => {
-                screen.classList.add('hidden');
-            });
-
-            if (allScreens[screenId]) {
-                allScreens[screenId].classList.remove('hidden');
-            }
-
-            navLinks.forEach(link => link.classList.remove('active'));
-            
-            let activeNavId;
-            if (screenId === 'dashboard') {
-                activeNavId = 'nav-dashboard';
-            } else if (screenId === 'select' || screenId === 'quiz' || screenId === 'results') {
-                activeNavId = 'nav-select';
-            }
-            
-            const activeNav = document.getElementById(activeNavId);
-            if (activeNav) {
-                activeNav.classList.add('active');
-            }
-            
-            if (screenId === 'dashboard') {
-                updateDashboardStats();
-            } else if (screenId === 'select') {
-                renderQuizSelection();
-            }
-            
-            // Ensure main content is scrolled to the top when screen changes
-            document.getElementById('content-area').scrollTop = 0;
+            document.querySelectorAll('#screens > div').forEach(div => div.classList.add('hidden'));
+            document.getElementById(`${screenId}-screen`)?.classList.remove('hidden');
+            if (screenId === 'quiz') document.getElementById('quiz-area').classList.remove('hidden');
         };
 
-        let appRevealed = false;
-        const revealApp = () => {
-            if (appRevealed) return;
-            appRevealed = true;
-
-            appWrapper.classList.remove('hidden');
-            appWrapper.style.opacity = '1';
-
-            // If there's an in-progress quiz state, resume directly.
-            if (currentQuizId && currentQuiz && currentQuestionIndex < currentQuiz.questions.length) {
-                quizTitleElement.textContent = currentQuiz.title;
-                showScreen('quiz');
-                displayQuestion();
-            } else {
-                showScreen('dashboard');
+        // FIXED SIGN OUT LOGIC
+        signOutBtn.addEventListener('click', async () => {
+            if (supabaseClient) {
+                await supabaseClient.auth.signOut();
             }
-        };
-
-        const updateDashboardStats = () => {
-            let totalCompleted = userStats.history.length;
-            let totalCorrect = 0;
-            let totalQuestions = 0;
-            
-            userStats.overallHighestAbsolute = { score: 0, total: 0, title: '' };
-            userStats.overallHighestPercentage = { percentage: 0, score: 0, total: 0, title: '' };
-
-            userStats.history.forEach(result => {
-                totalCorrect += result.score;
-                totalQuestions += result.totalQuestions;
-
-                const currentPercentage = result.totalQuestions > 0 ? (result.score / result.totalQuestions) * 100 : 0;
-                if (currentPercentage > userStats.overallHighestPercentage.percentage) {
-                    userStats.overallHighestPercentage = {
-                        percentage: currentPercentage,
-                        score: result.score,
-                        total: result.totalQuestions,
-                        title: result.title
-                    };
-                }
-                
-                // Track highest absolute score
-                if (result.score > userStats.overallHighestAbsolute.score || 
-                   (result.score === userStats.overallHighestAbsolute.score && result.totalQuestions > userStats.overallHighestAbsolute.total)) {
-                    userStats.overallHighestAbsolute = { 
-                        score: result.score, 
-                        total: result.totalQuestions,
-                        title: result.title
-                    };
-                }
-            });
-            
-            statCompleted.textContent = totalCompleted;
-            
-            const accuracyRate = totalQuestions > 0 ? (totalCorrect / totalQuestions) * 100 : 0;
-            statAccuracy.textContent = `${accuracyRate.toFixed(1)}%`;
-            
-            statHighest.textContent = userStats.overallHighestAbsolute.score === 0 ? '0/0' : 
-                `${userStats.overallHighestAbsolute.score}/${userStats.overallHighestAbsolute.total}`;
-            
-            if (userStats.overallHighestPercentage.percentage > 0) {
-                statBestQuiz.innerHTML = `<span class="text-2xl md:text-3xl font-extrabold">${userStats.overallHighestPercentage.percentage.toFixed(0)}%</span> <span class="text-xs md:text-base text-gray-400 block truncate">${userStats.overallHighestPercentage.title}</span>`;
-            } else {
-                statBestQuiz.textContent = '--';
-            }
-
-            renderQuizHistory();
-        };
-
-        const renderQuizHistory = () => {
-            quizHistoryContainer.innerHTML = '';
-            // Show only the last 3, reversed for newest first
-            const historyToShow = userStats.history.slice(-3).reverse();
-
-            if (historyToShow.length === 0) {
-                noHistoryMessage.classList.remove('hidden');
-                quizHistoryContainer.appendChild(noHistoryMessage);
-                return;
-            } else {
-                noHistoryMessage.classList.add('hidden');
-            }
-
-            historyToShow.forEach((result) => {
-                const percentage = (result.totalQuestions > 0) ? (result.score / result.totalQuestions) * 100 : 0;
-                let colorClass = 'text-accent-red'; 
-                if (percentage === 100) {
-                    colorClass = 'text-accent-green';
-                } else if (percentage >= 60) {
-                    colorClass = 'text-accent-blue';
-                }
-
-                const historyItem = document.createElement('div');
-                historyItem.className = 'card-container p-4 rounded-xl flex justify-between items-center border border-border-color/50';
-                historyItem.innerHTML = `
-                    <div>
-                        <p class="font-semibold">${result.title}</p>
-                        <p class="text-sm text-gray-400">${result.date}</p>
-                    </div>
-                    <div class="text-right">
-                        <p class="text-xl font-bold ${colorClass}">${result.score}/${result.totalQuestions}</p>
-                        <p class="text-xs ${colorClass}">${percentage.toFixed(0)}% Score</p>
-                    </div>
-                `;
-                quizHistoryContainer.appendChild(historyItem);
-            });
-        };
-
-        const renderQuizSelection = () => {
-            quizListContainer.innerHTML = '';
-            
-            const statsByQuiz = allQuizzes.map(quiz => {
-                const completedAttempts = userStats.history.filter(h => h.title === quiz.title);
-                const highestScore = completedAttempts.reduce((max, h) => Math.max(max, h.score), 0);
-                return {
-                    ...quiz,
-                    completed: completedAttempts.length,
-                    highestScore: highestScore
-                };
-            });
-
-
-            statsByQuiz.forEach(quiz => {
-                const card = document.createElement('div');
-                card.className = 'card-container p-6 rounded-xl shadow-lg border-t-4 border-accent-blue transition duration-300 hover:shadow-xl hover:scale-[1.02] cursor-pointer';
-                card.dataset.quizId = quiz.id;
-
-                // Determine border color based on quiz topic for visual differentiation
-                let borderColorClass = 'border-accent-blue';
-                if (quiz.id === 'quiz-science') borderColorClass = 'border-accent-green';
-                if (quiz.id === 'quiz-cs') borderColorClass = 'border-accent-yellow';
-                if (quiz.id === 'quiz-lit') borderColorClass = 'border-accent-purple';
-                if (quiz.id === 'quiz-geo') borderColorClass = 'border-accent-red';
-                if (quiz.id === 'quiz-subjective') borderColorClass = 'border-accent-purple'; // Using purple for subjective
-
-                card.classList.add(borderColorClass);
-
-
-                const maxScore = quiz.questions.length;
-
-                card.innerHTML = `
-                    <div class="flex items-center mb-4">
-                        ${quiz.icon}
-                        <h3 class="text-xl font-bold">${quiz.title}</h3>
-                    </div>
-                    <p class="text-sm text-gray-400 mb-4">${quiz.description}</p>
-                    <div class="flex justify-between items-center text-sm font-medium pt-2 border-t border-border-color/50">
-                        <span class="text-accent-green">Played: ${quiz.completed}</span>
-                        <span>Best Score: ${quiz.highestScore}/${maxScore}</span>
-                    </div>
-                `;
-                
-                card.addEventListener('click', () => startQuiz(quiz.id));
-                quizListContainer.appendChild(card);
-            });
-        };
-
-        const updateProgress = () => {
-            const totalQuestions = currentQuiz.questions.length;
-            const progress = currentQuestionIndex;
-            const percentage = (progress / totalQuestions) * 100;
-
-            progressText.textContent = `Question ${Math.min(currentQuestionIndex + 1, totalQuestions)} of ${totalQuestions}`;
-            progressBar.style.width = `${percentage}%`;
-        };
-
-        const resetQuestionUI = () => {
-            nextButton.disabled = true;
-            nextButton.classList.remove('bg-accent-blue', 'hover:bg-indigo-600');
-            nextButton.classList.add('bg-gray-500', 'text-gray-300');
-            messageBox.textContent = '';
-            messageBox.className = 'text-sm font-medium h-6 flex items-center';
-            
-            // Reset subjective elements (FIXED)
-            subjectiveInputArea.classList.add('hidden');
-            optionsContainer.classList.remove('hidden');
-            subjectiveAnswerTextarea.value = '';
-            subjectiveAnswerTextarea.disabled = false; // Enable textarea for new question
-            subjectiveFeedbackDiv.classList.add('hidden');
-
-            // Ensure subjective submit button is visible for new question (FIXED)
-            submitSubjectiveButton.classList.remove('hidden'); 
-            submitSubjectiveButton.disabled = true;
-            submitSubjectiveButton.classList.remove('bg-accent-blue', 'hover:bg-indigo-600');
-            submitSubjectiveButton.classList.add('bg-gray-500', 'text-gray-300');
-
-            // Ensure Next button is visible by default (will be hidden later for subjective question start) (FIXED)
-            nextButton.classList.remove('hidden');
-        };
-
-        const startQuiz = (quizId) => {
-            currentQuizId = quizId;
-            currentQuiz = allQuizzes.find(q => q.id === quizId);
-            
-            if (!currentQuiz) {
-                showScreen('select');
-                return;
-            }
-
-            currentQuestionIndex = 0;
-            score = 0;
-            quizTitleElement.textContent = currentQuiz.title;
-            showScreen('quiz');
-            displayQuestion();
-            scheduleProgressSave('start_quiz');
-        };
-
-        const displayQuestion = () => {
-            resetQuestionUI();
-            updateProgress();
-
-            if (currentQuestionIndex >= currentQuiz.questions.length) {
-                showResults();
-                return;
-            }
-
-            const question = currentQuiz.questions[currentQuestionIndex];
-            questionText.textContent = question.question;
-            optionsContainer.innerHTML = '';
-            answered = false;
-            
-            // Check quiz type
-            if (currentQuiz.type === 'subjective') {
-                optionsContainer.classList.add('hidden');
-                subjectiveInputArea.classList.remove('hidden');
-                
-                // Hide the next button ONLY at the start of the subjective question (FIXED)
-                nextButton.classList.add('hidden'); 
-
-            } else {
-                optionsContainer.classList.remove('hidden');
-                subjectiveInputArea.classList.add('hidden');
-                
-                // Ensure Next button is visible for MCQ
-                nextButton.classList.remove('hidden'); 
-                
-                question.options.forEach(option => {
-                    const button = document.createElement('button');
-                    button.textContent = option;
-                    button.className = `option-button w-full text-left p-4 rounded-xl text-sm md:text-lg font-medium border hover:scale-[1.005]`;
-                    button.addEventListener('click', () => checkAnswer(button, option, question.correct));
-                    optionsContainer.appendChild(button);
-                });
-            }
-        };
-
-        // Event listener for Subjective Answer Input
-        subjectiveAnswerTextarea.addEventListener('input', () => {
-            submitSubjectiveButton.disabled = subjectiveAnswerTextarea.value.trim() === '';
-            if (!submitSubjectiveButton.disabled) {
-                submitSubjectiveButton.classList.remove('bg-gray-500', 'text-gray-300');
-                submitSubjectiveButton.classList.add('bg-accent-blue', 'hover:bg-indigo-600');
-            } else {
-                submitSubjectiveButton.classList.add('bg-gray-500', 'text-gray-300');
-                submitSubjectiveButton.classList.remove('bg-accent-blue', 'hover:bg-indigo-600');
-            }
+            currentUser = null;
+            updateAuthUI();
+            window.location.reload(); 
         });
-        
-        // Event handler for Subjective Answer Submission (FIXED)
-        submitSubjectiveButton.addEventListener('click', () => {
-            if (answered) return;
-            answered = true;
-            
-            const question = currentQuiz.questions[currentQuestionIndex];
-            modelAnswerText.textContent = question.modelAnswer;
-            subjectiveAnswerTextarea.disabled = true;
-            submitSubjectiveButton.disabled = true;
-            
-            // Hide the subjective submit button after submission (FIXED)
-            submitSubjectiveButton.classList.add('hidden'); 
-            
-            subjectiveFeedbackDiv.classList.remove('hidden');
-            messageBox.textContent = 'Self-assess your answer using the buttons below.';
-            messageBox.classList.remove('text-accent-green', 'text-accent-red');
-            messageBox.classList.add('text-accent-yellow');
 
-            // Enable the self-assessment buttons for a fresh assessment (FIXED)
-            markCorrectButton.disabled = false;
-            markIncorrectButton.disabled = false;
-            scheduleProgressSave('answered');
+        document.getElementById('auth-guest').addEventListener('click', () => {
+            authOverlay.classList.add('hidden');
+            revealApp();
+            showScreen('dashboard');
         });
-        
-        // Event handlers for self-assessment (FIXED)
-        const handleSelfAssessment = (isCorrect) => {
-            if (isCorrect) {
-                score++;
-                messageBox.textContent = 'Marked as Correct. Good Job!';
-                messageBox.classList.remove('text-accent-yellow', 'text-accent-red');
-                messageBox.classList.add('text-accent-green');
-            } else {
-                messageBox.textContent = 'Marked as Incorrect. Review the Model Answer.';
-                messageBox.classList.remove('text-accent-yellow', 'text-accent-green');
-                messageBox.classList.add('text-accent-red');
-            }
-            
-            markCorrectButton.disabled = true;
-            markIncorrectButton.disabled = true;
-            
-            // Show the Next button and enable it after self-assessment (FIXED)
-            nextButton.classList.remove('hidden');
-            nextButton.disabled = false;
-            nextButton.classList.remove('bg-gray-500', 'text-gray-300');
-            nextButton.classList.add('bg-accent-blue', 'hover:bg-indigo-600');
-            scheduleProgressSave('answered');
-        };
 
-        markCorrectButton.addEventListener('click', () => handleSelfAssessment(true));
-        markIncorrectButton.addEventListener('click', () => handleSelfAssessment(false));
-
-
-        const checkAnswer = (selectedButton, selectedOption, correctOption) => {
-            if (answered) return;
-            answered = true;
-
-            Array.from(optionsContainer.children).forEach(button => {
-                button.disabled = true;
-                button.classList.remove('hover:scale-[1.005]');
-            });
-
-            selectedButton.classList.add('selected');
-
-            if (selectedOption === correctOption) {
-                score++;
-                selectedButton.classList.add('correct', 'bg-accent-green', 'border-accent-green');
-                messageBox.textContent = 'Correct Answer!';
-                messageBox.classList.remove('text-accent-red');
-                messageBox.classList.add('text-accent-green');
-            } else {
-                selectedButton.classList.add('incorrect', 'bg-accent-red', 'border-accent-red');
-                messageBox.textContent = 'Incorrect Answer.';
-                messageBox.classList.remove('text-accent-green');
-                messageBox.classList.add('text-accent-red');
-
-                Array.from(optionsContainer.children).forEach(button => {
-                    if (button.textContent === correctOption) {
-                        // Highlight the correct answer
-                        button.classList.add('correct', 'bg-accent-green', 'border-4');
+        window.addEventListener('DOMContentLoaded', async () => {
+            await initSupabaseClient();
+            if (supabaseClient) {
+                const { data } = await supabaseClient.auth.getSession();
+                currentUser = data?.session?.user ?? null;
+                updateAuthUI();
+                supabaseClient.auth.onAuthStateChange((_event, session) => {
+                    currentUser = session?.user ?? null;
+                    updateAuthUI();
+                    if (currentUser) {
+                        authOverlay.classList.add('hidden');
+                        revealApp();
+                        showScreen('dashboard');
                     }
                 });
             }
-
-            nextButton.disabled = false;
-            nextButton.classList.remove('bg-gray-500', 'text-gray-300');
-            nextButton.classList.add('bg-accent-blue', 'hover:bg-indigo-600');
-            scheduleProgressSave('answered');
-        };
-
-        const nextQuestion = () => {
-            currentQuestionIndex++;
-            if (currentQuestionIndex < currentQuiz.questions.length) {
-                displayQuestion();
+            document.getElementById('splash-screen').classList.add('hidden');
+            if (currentUser) {
+                revealApp();
+                showScreen('dashboard');
             } else {
-                showResults();
+                authOverlay.classList.remove('hidden');
             }
-            scheduleProgressSave('next');
-        };
-
-        const showResults = () => {
-            const totalQuestions = currentQuiz.questions.length;
-            const percentage = (totalQuestions > 0) ? (score / totalQuestions) * 100 : 0;
-
-            const newResult = {
-                title: currentQuiz.title,
-                score: score,
-                totalQuestions: totalQuestions,
-                date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-            };
-            userStats.history.push(newResult);
-
-            if (score > userStats.overallHighestAbsolute.score) {
-                 userStats.overallHighestAbsolute = { 
-                    score: score, 
-                    total: totalQuestions,
-                    title: currentQuiz.title
-                };
-            }
-
-            if (percentage > userStats.overallHighestPercentage.percentage) {
-                userStats.overallHighestPercentage = {
-                    percentage: percentage,
-                    score: score,
-                    total: totalQuestions,
-                    title: currentQuiz.title
-                };
-            }
-
-            showScreen('results');
-
-            let title = '';
-            if (percentage === 100) {
-                title = 'PERFECT! You are a Master! 👑';
-                resultsTitle.className = 'text-3xl md:text-4xl font-extrabold mb-4 text-accent-green';
-            } else if (percentage >= 60) {
-                title = 'Great Job! Knowledge Gained 👍';
-                resultsTitle.className = 'text-3xl md:text-4xl font-extrabold mb-4 text-accent-blue';
-            } else {
-                title = 'Needs Review. Try Again Soon 📚';
-                resultsTitle.className = 'text-3xl md:text-4xl font-extrabold mb-4 text-accent-red';
-            }
-
-            resultsTitle.textContent = title;
-            resultsScore.textContent = `You scored ${score} out of ${totalQuestions} (${percentage.toFixed(0)}%) in the ${currentQuiz.title} Quiz.`;
-            progressBar.style.width = `100%`;
-            progressText.textContent = `Quiz Finished`;
-            scheduleProgressSave('quiz_completed');
-        };
+        });
 
         document.getElementById('nav-dashboard').addEventListener('click', () => showScreen('dashboard'));
         document.getElementById('nav-select').addEventListener('click', () => showScreen('select'));
-        dashboardSelectButton.addEventListener('click', () => showScreen('select'));
-        nextButton.addEventListener('click', nextQuestion);
-        resultsDashboardButton.addEventListener('click', () => showScreen('dashboard'));
-        themeToggle.addEventListener('click', toggleTheme);
-
-        const initApp = () => {
-            // Keep the app hidden until auth/guest selection completes.
-            appWrapper.classList.add('hidden');
-            appWrapper.style.opacity = '0';
-            
-            // Set initial theme based on system preference (optional)
-            const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-            if (!prefersDark) {
-                // If system preference is light, initialize in light mode
-                body.classList.add('light-mode');
-                sunIcon.classList.remove('hidden');
-                moonIcon.classList.add('hidden');
-                themeText.textContent = 'Dark Mode';
-            } else {
-                // Default to dark mode if preference is dark or not available
-                sunIcon.classList.add('hidden');
-                moonIcon.classList.remove('hidden');
-                themeText.textContent = 'Light Mode';
-            }
-        };
-
-        const runSplash = async () => {
-            // Show splash briefly, then fade it out.
-            await new Promise((r) => setTimeout(r, 1000));
-            splashScreen.style.opacity = '0';
-            await new Promise((r) => setTimeout(r, 700));
-            splashScreen.classList.add('hidden');
-        };
-
-        // ---- Auth events ----
-        authTabSignin.addEventListener('click', () => setAuthMode('signin'));
-        authTabSignup.addEventListener('click', () => setAuthMode('signup'));
-        authClose.addEventListener('click', closeAuthOverlay);
-        signInBtn.addEventListener('click', () => openAuthOverlay({ allowClose: true }));
-
-        authGuest.addEventListener('click', () => {
-            closeAuthOverlay();
-            applyLoadedProgress(getLocalDraft());
-            progressLoaded = true;
-            updateDashboardStats();
-            revealApp();
-        });
-
-        authSubmit.addEventListener('click', async () => {
-            setAuthError('');
-            if (!supabaseClient) {
-                return;
-            }
-            const email = authEmail.value.trim();
-            const password = authPassword.value;
-            if (!email || !password || password.length < 6) {
-                setAuthError('Enter a valid email and password (6+ characters).');
-                return;
-            }
-            authSubmit.disabled = true;
-            authSubmit.classList.add('opacity-80', 'cursor-not-allowed');
-            try {
-                if (authMode === 'signin') {
-                    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-                    if (error) throw error;
-                    currentUser = data.user;
-                } else {
-                    const { data: signUpData, error: signUpError } = await supabaseClient.auth.signUp({ email, password });
-                    if (signUpError) throw signUpError;
-
-                    // If email confirmation is disabled in Supabase, this will immediately work.
-                    // If it's enabled, sign-in will fail and we show a clear message.
-                    const { data: signInData, error: signInError } = await supabaseClient.auth.signInWithPassword({ email, password });
-                    if (signInError) {
-                        setAuthError('Account created. If you must confirm email, check your inbox. Otherwise disable email confirmation in Supabase to sign in immediately.');
-                        return;
-                    }
-                    currentUser = signInData.user || signUpData.user;
-                }
-                updateAuthUI();
-                closeAuthOverlay();
-                progressLoaded = false;
-                await ensureSignedIn();
-
-                revealApp();
-                scheduleProgressSave('signed_in');
-            } catch (e) {
-                setAuthError(e?.message || 'Authentication failed.');
-            } finally {
-                authSubmit.disabled = false;
-                authSubmit.classList.remove('opacity-80', 'cursor-not-allowed');
-            }
-        });
-
-        signOutBtn.addEventListener('click', async () => {
-            if (!supabaseClient) return;
-            await supabaseClient.auth.signOut();
-            currentUser = null;
-            updateAuthUI();
-        });
-
-        const wireAuthStateListener = () => {
-            if (!supabaseClient) return;
-            supabaseClient.auth.onAuthStateChange(async (_event, session) => {
-                currentUser = session?.user ?? null;
-                updateAuthUI();
-                if (currentUser) {
-                    closeAuthOverlay();
-                    progressLoaded = false;
-                    await ensureSignedIn();
-                }
-            });
-        };
-
-        // Use DOMContentLoaded (not window.onload) so the splash doesn't hang
-        // if a CDN script/resource is slow or blocked.
-        window.addEventListener('DOMContentLoaded', async () => {
-            initApp();
-            await runSplash();
-            supabaseClient = await initSupabaseClient();
-            wireAuthStateListener();
-
-            try {
-                await ensureSignedIn();
-            } catch (e) {
-                debugWarn('Auth init failed:', e?.message || e);
-            }
-
-            // If signed in already, show the app. Otherwise, show sign-in first.
-            if (currentUser) {
-                revealApp();
-            } else {
-                // Fall back to local draft for stats display after guest selection.
-                // (We don't reveal the app until the user signs in or chooses guest.)
-                openAuthOverlay({ allowClose: false });
-                // If Supabase isn't configured, disable auth submit silently.
-                if (!supabaseClient) authSubmit.disabled = true;
-            }
-        });
-
+        document.getElementById('theme-toggle').addEventListener('click', () => body.classList.toggle('light-mode'));
     </script>
 </body>
 </html>
