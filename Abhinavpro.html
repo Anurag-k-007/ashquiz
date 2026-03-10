@@ -528,6 +528,19 @@
         let progressSaveTimer = null;
         let progressLoaded = false;
 
+        // Public-safe logging (off by default). Enable locally via:
+        // localStorage.setItem('ashquiz_debug','1') then refresh.
+        const isDebugEnabled = () => {
+            try {
+                return localStorage.getItem('ashquiz_debug') === '1' ||
+                    ['localhost', '127.0.0.1'].includes(window.location.hostname);
+            } catch {
+                return false;
+            }
+        };
+        const debugLog = (...args) => { if (isDebugEnabled()) console.log(...args); };
+        const debugWarn = (...args) => { if (isDebugEnabled()) console.warn(...args); };
+
         const setAuthError = (msg) => {
             if (!msg) {
                 authError.classList.add('hidden');
@@ -629,7 +642,7 @@
                 .eq('user_id', currentUser.id)
                 .maybeSingle();
             if (error) {
-                console.warn('Failed to load progress:', error.message);
+                debugWarn('Failed to load progress:', error.message);
                 return null;
             }
             return data || null;
@@ -646,7 +659,7 @@
             const { error } = await supabaseClient
                 .from('ash_user_progress')
                 .upsert(row, { onConflict: 'user_id' });
-            if (error) console.warn('Failed to save progress:', error.message);
+            if (error) debugWarn('Failed to save progress:', error.message);
         };
 
         const scheduleProgressSave = (reason = 'auto') => {
@@ -1268,7 +1281,7 @@
             try {
                 await ensureSignedIn();
             } catch (e) {
-                console.warn('Auth init failed:', e?.message || e);
+                debugWarn('Auth init failed:', e?.message || e);
             }
 
             // If Supabase isn't configured, fall back to local draft (so progress still works).
