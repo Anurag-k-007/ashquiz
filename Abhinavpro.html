@@ -686,8 +686,9 @@
 
         const ensureSignedIn = async () => {
             if (!supabaseClient) {
-                openAuthOverlay({ allowClose: true });
-                setAuthError('Supabase is not configured. Deploy on Vercel (or run `vercel dev`) to enable login. You can continue as guest (local progress only).');
+                // Supabase not available (e.g. static file preview). Run silently in guest mode.
+                currentUser = null;
+                updateAuthUI();
                 return;
             }
 
@@ -696,7 +697,6 @@
             updateAuthUI();
 
             if (!currentUser) {
-                openAuthOverlay({ allowClose: true });
                 return;
             }
 
@@ -757,6 +757,24 @@
             
             // Ensure main content is scrolled to the top when screen changes
             document.getElementById('content-area').scrollTop = 0;
+        };
+
+        let appRevealed = false;
+        const revealApp = () => {
+            if (appRevealed) return;
+            appRevealed = true;
+
+            appWrapper.classList.remove('hidden');
+            appWrapper.style.opacity = '1';
+
+            // If there's an in-progress quiz state, resume directly.
+            if (currentQuizId && currentQuiz && currentQuestionIndex < currentQuiz.questions.length) {
+                quizTitleElement.textContent = currentQuiz.title;
+                showScreen('quiz');
+                displayQuestion();
+            } else {
+                showScreen('dashboard');
+            }
         };
 
         const updateDashboardStats = () => {
@@ -1154,16 +1172,9 @@
         themeToggle.addEventListener('click', toggleTheme);
 
         const initApp = () => {
-            appWrapper.classList.remove('hidden');
-            
-            setTimeout(() => {
-                splashScreen.style.opacity = '0';
-                setTimeout(() => {
-                    splashScreen.classList.add('hidden');
-                    appWrapper.style.opacity = '1';
-                }, 700); 
-                showScreen('dashboard');
-            }, 1000);
+            // Keep the app hidden until auth/guest selection completes.
+            appWrapper.classList.add('hidden');
+            appWrapper.style.opacity = '0';
             
             // Set initial theme based on system preference (optional)
             const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -1181,6 +1192,14 @@
             }
         };
 
+        const runSplash = async () => {
+            // Show splash briefly, then fade it out.
+            await new Promise((r) => setTimeout(r, 1000));
+            splashScreen.style.opacity = '0';
+            await new Promise((r) => setTimeout(r, 700));
+            splashScreen.classList.add('hidden');
+        };
+
         // ---- Auth events ----
         authTabSignin.addEventListener('click', () => setAuthMode('signin'));
         authTabSignup.addEventListener('click', () => setAuthMode('signup'));
@@ -1192,12 +1211,12 @@
             applyLoadedProgress(getLocalDraft());
             progressLoaded = true;
             updateDashboardStats();
+            revealApp();
         });
 
         authSubmit.addEventListener('click', async () => {
             setAuthError('');
             if (!supabaseClient) {
-                setAuthError('Supabase is not configured. You can continue as guest (local progress only).');
                 return;
             }
             const email = authEmail.value.trim();
@@ -1231,14 +1250,7 @@
                 progressLoaded = false;
                 await ensureSignedIn();
 
-                // If we have an in-progress quiz state, resume directly.
-                if (currentQuizId && currentQuiz && currentQuestionIndex < currentQuiz.questions.length) {
-                    quizTitleElement.textContent = currentQuiz.title;
-                    showScreen('quiz');
-                    displayQuestion();
-                } else {
-                    showScreen('dashboard');
-                }
+                revealApp();
                 scheduleProgressSave('signed_in');
             } catch (e) {
                 setAuthError(e?.message || 'Authentication failed.');
@@ -1253,7 +1265,6 @@
             await supabaseClient.auth.signOut();
             currentUser = null;
             updateAuthUI();
-            openAuthOverlay({ allowClose: true });
         });
 
         const wireAuthStateListener = () => {
@@ -1265,8 +1276,6 @@
                     closeAuthOverlay();
                     progressLoaded = false;
                     await ensureSignedIn();
-                } else {
-                    openAuthOverlay({ allowClose: true });
                 }
             });
         };
@@ -1275,6 +1284,7 @@
         // if a CDN script/resource is slow or blocked.
         window.addEventListener('DOMContentLoaded', async () => {
             initApp();
+            await runSplash();
             supabaseClient = await initSupabaseClient();
             wireAuthStateListener();
 
@@ -1284,18 +1294,15 @@
                 debugWarn('Auth init failed:', e?.message || e);
             }
 
-            // If Supabase isn't configured, fall back to local draft (so progress still works).
-            if (!supabaseClient) {
-                applyLoadedProgress(getLocalDraft());
-                progressLoaded = true;
-                updateDashboardStats();
-            }
-
-            // Auto-resume if there's an in-progress quiz in saved state.
-            if (currentQuizId && currentQuiz && currentQuestionIndex < currentQuiz.questions.length) {
-                quizTitleElement.textContent = currentQuiz.title;
-                showScreen('quiz');
-                displayQuestion();
+            // If signed in already, show the app. Otherwise, show sign-in first.
+            if (currentUser) {
+                revealApp();
+            } else {
+                // Fall back to local draft for stats display after guest selection.
+                // (We don't reveal the app until the user signs in or chooses guest.)
+                openAuthOverlay({ allowClose: false });
+                // If Supabase isn't configured, disable auth submit silently.
+                if (!supabaseClient) authSubmit.disabled = true;
             }
         });
 
